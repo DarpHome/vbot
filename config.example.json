@@ -1,0 +1,7 @@
+{
+  "token": "token",
+  "authorized_roles": [
+    "123",
+    "456"
+  ]
+}
