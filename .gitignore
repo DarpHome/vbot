@@ -24,3 +24,6 @@ bin/
 *.js
 config.json
 config.toml
+
+docs.json
+__pycache__/

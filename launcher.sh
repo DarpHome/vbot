@@ -12,5 +12,5 @@ while [ $i -lt 3 ]; do
     i=0
   fi
 done
-
+echo "Failed"
 sleep 2592000
