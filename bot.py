@@ -121,6 +121,10 @@ class EvalModal(discord.ui.Modal, title="Evaluate V code"):
                 embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
                 view=DeleteButtonView(interaction.user.id),
             )
+        if response.output == "":
+            return await interaction.response.send_message(
+                "No output was produced.", view=DeleteButtonView(interaction.user.id)
+            )
         return await interaction.response.send_message(
             f"```rs\n{response.output}\n```",
             embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
@@ -210,6 +214,10 @@ class FormatModal(discord.ui.Modal, title="Format V code"):
                     io.BytesIO(response.output.encode("utf_8")), "output.rs"
                 ),
                 view=DeleteButtonView(interaction.user.id),
+            )
+        if response.output == "":
+            return await interaction.response.send_message(
+                "No output was produced.", view=DeleteButtonView(interaction.user.id)
             )
         return await interaction.response.send_message(
             f"```rs\n{response.output}\n```", view=DeleteButtonView(interaction.user.id)
@@ -381,7 +389,7 @@ class BaseCog(commands.Cog, name="base"):
     async def slash_format(self, interaction: discord.Interaction["Bot"]) -> None:
         await interaction.response.send_modal(FormatModal(timeout=None))
 
-    @commands.command("eval", aliases=["e", "exec", "exe", "evl"])
+    @commands.command("eval", aliases=["e", "exec", "exe", "evl", "run", "execute"])
     async def text_eval(self, ctx: commands.Context["Bot"], *, code: str) -> None:
         """Execute V code.
 
@@ -410,11 +418,16 @@ class BaseCog(commands.Cog, name="base"):
                 view=DeleteButtonView(ctx.author.id),
             )
             return
+        if response.output == "":
+            await ctx.send(
+                "No output was produced.", view=DeleteButtonView(ctx.author.id)
+            )
+            return
         await ctx.send(
             f"```rs\n{response.output}\n```", view=DeleteButtonView(ctx.author.id)
         )
 
-    @commands.command("cgen", aliases=["c", "gen", "g"])
+    @commands.command("cgen", aliases=["c", "gen", "g", "codegen", "cg", "kodegen"])
     async def text_cgen(self, ctx: commands.Context["Bot"], *, code: str) -> None:
         """Show cgen output from V code.
 
@@ -480,6 +493,11 @@ class BaseCog(commands.Cog, name="base"):
                     io.BytesIO(response.output.encode("utf_8")), "output.rs"
                 ),
                 view=DeleteButtonView(ctx.author.id),
+            )
+            return
+        if response.output == "":
+            await ctx.send(
+                "No output was produced.", view=DeleteButtonView(ctx.author.id)
             )
             return
         await ctx.send(
