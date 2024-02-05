@@ -291,7 +291,7 @@ class BaseCog(commands.Cog, name="base"):
             embed=discord.Embed(
                 title=f"{module} {closest.name}",
                 description=description,
-                url=config["docs"].get(
+                url=config.get("docs", {}).get(
                     module, f"https://modules.vlang.io/{module}.html"
                 )
                 + "#"
