@@ -97,10 +97,12 @@ class EvalModal(discord.ui.Modal, title="Evaluate V code"):
                         io.BytesIO(response.error.encode("utf_8")), "error.rs"
                     ),
                     embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                    view=DeleteButtonView(interaction.user.id),
                 )
             return await interaction.response.send_message(
                 f"```rs\n{response.error}\n```",
                 embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                view=DeleteButtonView(interaction.user.id),
             )
         embed = discord.Embed(
             color=0x4287F5,
@@ -116,10 +118,12 @@ class EvalModal(discord.ui.Modal, title="Evaluate V code"):
                     io.BytesIO(response.output.encode("utf_8")), "output.rs"
                 ),
                 embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                view=DeleteButtonView(interaction.user.id),
             )
         return await interaction.response.send_message(
             f"```rs\n{response.output}\n```",
             embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+            view=DeleteButtonView(interaction.user.id),
         )
 
 
@@ -152,10 +156,12 @@ class CgenModal(discord.ui.Modal, title="Show cgen output from V code"):
                         io.BytesIO(response.error.encode("utf_8")), "error.rs"
                     ),
                     embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                    view=DeleteButtonView(interaction.user.id),
                 )
             return await interaction.response.send_message(
                 f"```rs\n{response.error}\n```",
                 embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                view=DeleteButtonView(interaction.user.id),
             )
         embed = discord.Embed(
             color=0x4287F5,
@@ -169,10 +175,12 @@ class CgenModal(discord.ui.Modal, title="Show cgen output from V code"):
                     io.BytesIO(response.cgen_code.encode("utf_8")), "output.c"
                 ),
                 embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                view=DeleteButtonView(interaction.user.id),
             )
         return await interaction.response.send_message(
             f"```c\n{response.cgen_code}\n```",
             embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+            view=DeleteButtonView(interaction.user.id),
         )
 
 
@@ -188,18 +196,23 @@ class FormatModal(discord.ui.Modal, title="Format V code"):
                 return await interaction.response.send_message(
                     file=discord.File(
                         io.BytesIO(response.error.encode("utf_8")), "error.rs"
-                    )
+                    ),
+                    view=DeleteButtonView(interaction.user.id),
                 )
             return await interaction.response.send_message(
-                f"```rs\n{response.error}\n```"
+                f"```rs\n{response.error}\n```",
+                view=DeleteButtonView(interaction.user.id),
             )
         if len(response.output) >= 1989:
             return await interaction.response.send_message(
                 file=discord.File(
                     io.BytesIO(response.output.encode("utf_8")), "output.rs"
-                )
+                ),
+                view=DeleteButtonView(interaction.user.id),
             )
-        return await interaction.response.send_message(f"```rs\n{response.output}\n```")
+        return await interaction.response.send_message(
+            f"```rs\n{response.output}\n```", view=DeleteButtonView(interaction.user.id)
+        )
 
 
 @dataclasses.dataclass
@@ -312,6 +325,7 @@ class BaseCog(commands.Cog, name="base"):
                     discord.File(io.BytesIO(stderr), "stderr.txt"),
                     discord.File(io.BytesIO(stdout), "stdout.txt"),
                 ],
+                view=DeleteButtonView(ctx.author.id),
             )
         else:
             await ctx.message.add_reaction("\N{THUMBS UP SIGN}")
@@ -334,6 +348,7 @@ class BaseCog(commands.Cog, name="base"):
                     discord.File(io.BytesIO(stderr), "stderr.txt"),
                     discord.File(io.BytesIO(stdout), "stdout.txt"),
                 ],
+                view=DeleteButtonView(ctx.author.id),
             )
         else:
             await ctx.message.add_reaction("\N{THUMBS UP SIGN}")
@@ -354,19 +369,19 @@ class BaseCog(commands.Cog, name="base"):
     v = app_commands.Group(name="v", description="V related stuff")
 
     @v.command(name="eval", description="Show modal, then evaluate code")
-    async def slash_eval(self, interaction: discord.Interaction) -> None:
+    async def slash_eval(self, interaction: discord.Interaction["Bot"]) -> None:
         await interaction.response.send_modal(EvalModal(timeout=None))
 
     @v.command(name="cgen", description="Show modal, then show cgen output")
-    async def slash_cgen(self, interaction: discord.Interaction) -> None:
+    async def slash_cgen(self, interaction: discord.Interaction["Bot"]) -> None:
         await interaction.response.send_modal(CgenModal(timeout=None))
 
     @v.command(name="format", description="Show modal, then format code")
-    async def slash_format(self, interaction: discord.Interaction) -> None:
+    async def slash_format(self, interaction: discord.Interaction["Bot"]) -> None:
         await interaction.response.send_modal(FormatModal(timeout=None))
 
     @commands.command("eval", aliases=["e", "exec", "exe", "evl"])
-    async def text_eval(self, ctx: commands.Context, *, code: str) -> None:
+    async def text_eval(self, ctx: commands.Context["Bot"], *, code: str) -> None:
         """Execute V code.
 
         Parameters
@@ -380,7 +395,8 @@ class BaseCog(commands.Cog, name="base"):
                 await ctx.send(
                     file=discord.File(
                         io.BytesIO(response.error.encode("utf_8")), "error.rs"
-                    )
+                    ),
+                    view=DeleteButtonView(ctx.author.id),
                 )
             else:
                 await ctx.send(f"```rs\n{response.error}\n```")
@@ -389,13 +405,16 @@ class BaseCog(commands.Cog, name="base"):
             await ctx.send(
                 file=discord.File(
                     io.BytesIO(response.output.encode("utf_8")), "output.rs"
-                )
+                ),
+                view=DeleteButtonView(ctx.author.id),
             )
             return
-        await ctx.send(f"```rs\n{response.output}\n```")
+        await ctx.send(
+            f"```rs\n{response.output}\n```", view=DeleteButtonView(ctx.author.id)
+        )
 
     @commands.command("cgen", aliases=["c", "gen", "g"])
-    async def text_cgen(self, ctx: commands.Context, *, code: str) -> None:
+    async def text_cgen(self, ctx: commands.Context["Bot"], *, code: str) -> None:
         """Show cgen output from V code.
 
         Parameters
@@ -409,22 +428,29 @@ class BaseCog(commands.Cog, name="base"):
                 await ctx.send(
                     file=discord.File(
                         io.BytesIO(response.error.encode("utf_8")), "error.rs"
-                    )
+                    ),
+                    view=DeleteButtonView(ctx.author.id),
                 )
             else:
-                await ctx.send(f"```rs\n{response.error}\n```")
+                await ctx.send(
+                    f"```rs\n{response.error}\n```",
+                    view=DeleteButtonView(ctx.author.id),
+                )
             return
         elif len(response.cgen_code) >= 1990:
             await ctx.send(
                 file=discord.File(
                     io.BytesIO(response.cgen_code.encode("utf_8")), "output.c"
-                )
+                ),
+                view=DeleteButtonView(ctx.author.id),
             )
             return
-        await ctx.send(f"```c\n{response.cgen_code}\n```")
+        await ctx.send(
+            f"```c\n{response.cgen_code}\n```", view=DeleteButtonView(ctx.author.id)
+        )
 
     @commands.command("format", aliases=["f", "fmt", "formt"])
-    async def text_format(self, ctx: commands.Context, *, code: str) -> None:
+    async def text_format(self, ctx: commands.Context["Bot"], *, code: str) -> None:
         """Format V code.
 
         Parameters
@@ -438,19 +464,26 @@ class BaseCog(commands.Cog, name="base"):
                 await ctx.send(
                     file=discord.File(
                         io.BytesIO(response.error.encode("utf_8")), "error.rs"
-                    )
+                    ),
+                    view=DeleteButtonView(ctx.author.id),
                 )
             else:
-                await ctx.send(f"```rs\n{response.error}\n```")
+                await ctx.send(
+                    f"```rs\n{response.error}\n```",
+                    view=DeleteButtonView(ctx.author.id),
+                )
             return
         elif len(response.output) >= 1989:
             await ctx.send(
                 file=discord.File(
                     io.BytesIO(response.output.encode("utf_8")), "output.rs"
-                )
+                ),
+                view=DeleteButtonView(ctx.author.id),
             )
             return
-        await ctx.send(f"```rs\n{response.output}\n```")
+        await ctx.send(
+            f"```rs\n{response.output}\n```", view=DeleteButtonView(ctx.author.id)
+        )
 
 
 # make vb!help not depend on cache
