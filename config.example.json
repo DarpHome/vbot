@@ -3,5 +3,9 @@
   "authorized_roles": [
     "123",
     "456"
-  ]
+  ],
+  "docs": {
+    "discord": "https://darphome.github.io/discord.v/discord.html",
+    "rcon": "https://darphome.github.io/rcon.v/rcon.html"
+  }
 }

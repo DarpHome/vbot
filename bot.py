@@ -1,14 +1,19 @@
-import ast
+# requires discord.py v2.4
+
+import aiohttp
 import asyncio
 import dataclasses
-import hikari
+import discord
+from discord import app_commands
+from discord.ext import commands
 import json
 import os
+import io
 from os.path import join
-import tanjun
-import textwrap
+import re
 import traceback
 import typing
+import vplayground
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -28,8 +33,6 @@ def load_docs() -> dict[str, typing.Any]:
             traceback.print_exception(exc)
     return docs
 
-
-docs: dict[str, typing.Any] = load_docs()
 
 with open("headers.json", "r") as file:
     headers = json.load(file)
@@ -57,27 +60,146 @@ def levenshtein(x: str, y: str) -> int:
     return d[-1][-1]
 
 
-bot = hikari.GatewayBot(
-    config["token"],
-    intents=hikari.Intents.ALL_MESSAGES | hikari.Intents.MESSAGE_CONTENT,
-)
-client = tanjun.Client.from_gateway_bot(
-    bot,
-    declare_global_commands=True,
-    mention_prefix=False,
-).add_prefix("vb!")
+class EvalModal(discord.ui.Modal, title="Evaluate V code"):
+    code = discord.ui.TextInput(
+        label="Code", style=discord.TextStyle.paragraph, custom_id="code"
+    )
+    build_arguments = discord.ui.TextInput(
+        label="Build arguments",
+        custom_id="build_arguments",
+        required=False,
+        max_length=100,
+    )
+    run_arguments = discord.ui.TextInput(
+        label="Run arguments", custom_id="run_arguments", required=False, max_length=100
+    )
 
-base = tanjun.Component()
+    async def on_submit(self, interaction: discord.Interaction["Bot"]) -> None:
+        build_arguments = self.build_arguments.value
+        run_arguments = self.run_arguments.value
+        response = await interaction.client.v.run(
+            self.code.value,
+            build_arguments=build_arguments,
+            run_arguments=run_arguments,
+        )
+        if response.error != "":
+            embed = discord.Embed(
+                color=0x4287F5,
+                title="Compilation failed!",
+            )
+            if build_arguments != "":
+                embed.add_field(name="Build arguments", value=build_arguments)
+            if run_arguments != "":
+                embed.add_field(name="Run arguments", value=run_arguments)
+            if len(response.error) >= 1989:
+                return await interaction.response.send_message(
+                    file=discord.File(
+                        io.BytesIO(response.error.encode("utf_8")), "error.rs"
+                    ),
+                    embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                )
+            return await interaction.response.send_message(
+                f"```rs\n{response.error}\n```",
+                embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+            )
+        embed = discord.Embed(
+            color=0x4287F5,
+            title="Successful execution",
+        )
+        if build_arguments != "":
+            embed.add_field(name="Build arguments", value=build_arguments)
+        if run_arguments != "":
+            embed.add_field(name="Run arguments", value=run_arguments)
+        if len(response.output) >= 1989:
+            return await interaction.response.send_message(
+                file=discord.File(
+                    io.BytesIO(response.output.encode("utf_8")), "output.rs"
+                ),
+                embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+            )
+        return await interaction.response.send_message(
+            f"```rs\n{response.output}\n```",
+            embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+        )
 
 
-@base.with_slash_command
-@tanjun.with_str_slash_option("query", "The query for the search")
-@tanjun.as_slash_command("docs", "Search within the docs")
-async def search_docs(ctx: tanjun.abc.SlashContext, query: str) -> None:
-    scores = [levenshtein(query, h) for h in headers]
-    lowest = min(scores)
-    header = headers[scores.index(lowest)]
-    await ctx.respond(f"<https://github.com/vlang/v/blob/master/doc/docs.md{header}>")
+class CgenModal(discord.ui.Modal, title="Show cgen output from V code"):
+    code = discord.ui.TextInput(
+        label="Code", style=discord.TextStyle.paragraph, custom_id="code"
+    )
+    build_arguments = discord.ui.TextInput(
+        label="Build arguments",
+        custom_id="build_arguments",
+        required=False,
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction["Bot"]) -> None:
+        build_arguments = self.build_arguments.value
+        response = await interaction.client.v.cgen(
+            self.code.value, build_arguments=build_arguments
+        )
+        if response.error != "":
+            embed = discord.Embed(
+                color=0x4287F5,
+                title="Compilation failed!",
+            )
+            if build_arguments != "":
+                embed.add_field(name="Build arguments", value=build_arguments)
+            if len(response.error) >= 1989:
+                return await interaction.response.send_message(
+                    file=discord.File(
+                        io.BytesIO(response.error.encode("utf_8")), "error.rs"
+                    ),
+                    embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+                )
+            return await interaction.response.send_message(
+                f"```rs\n{response.error}\n```",
+                embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+            )
+        embed = discord.Embed(
+            color=0x4287F5,
+            title="Successful compilation",
+        )
+        if build_arguments != "":
+            embed.add_field(name="Build arguments", value=build_arguments)
+        if len(response.cgen_code) >= 1990:
+            return await interaction.response.send_message(
+                file=discord.File(
+                    io.BytesIO(response.cgen_code.encode("utf_8")), "output.c"
+                ),
+                embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+            )
+        return await interaction.response.send_message(
+            f"```c\n{response.cgen_code}\n```",
+            embed=embed if len(embed.fields) > 0 else discord.utils.MISSING,
+        )
+
+
+class FormatModal(discord.ui.Modal, title="Format V code"):
+    code = discord.ui.TextInput(
+        label="Code", style=discord.TextStyle.paragraph, custom_id="code"
+    )
+
+    async def on_submit(self, interaction: discord.Interaction["Bot"]) -> None:
+        response = await interaction.client.v.format(self.code.value)
+        if response.error != "":
+            if len(response.error) >= 1989:
+                return await interaction.response.send_message(
+                    file=discord.File(
+                        io.BytesIO(response.error.encode("utf_8")), "error.rs"
+                    )
+                )
+            return await interaction.response.send_message(
+                f"```rs\n{response.error}\n```"
+            )
+        if len(response.output) >= 1989:
+            return await interaction.response.send_message(
+                file=discord.File(
+                    io.BytesIO(response.output.encode("utf_8")), "output.rs"
+                )
+            )
+        return await interaction.response.send_message(f"```rs\n{response.output}\n```")
 
 
 @dataclasses.dataclass
@@ -87,202 +209,326 @@ class Section:
     comments: list[str] = dataclasses.field(default_factory=lambda: [])
 
 
-@base.with_slash_command
-@tanjun.with_str_slash_option("query", "The query for the search")
-@tanjun.with_str_slash_option("module", "The module to search in")
-@tanjun.as_slash_command("vdoc", "Search within a vlib")
-async def vdoc(ctx: tanjun.abc.SlashContext, module: str, query: str) -> None:
-    lowest, closest = 2147483647, Section()
-    contents = docs.get(module)
-    if contents is None:
-        await ctx.respond(f"Module `{module}` not found.")
-        return
-    for section in contents["contents"]:
-        score = levenshtein(query, section["name"])
-        if score < lowest:
-            lowest = score
-            closest = Section(
-                name=section["name"],
-                content=section["content"],
-                comments=[comment["text"] for comment in section["comments"]],
-            )
-        for child in section["children"]:
-            child_score = levenshtein(query, child["name"])
-            if child_score < lowest:
-                lowest = child_score
+class BaseCog(commands.Cog, name="base"):
+    docs: dict[str, typing.Any]
+
+    def __init__(self) -> None:
+        self.docs = load_docs()
+
+    @commands.hybrid_command("docs")
+    async def search_docs(self, ctx: commands.Context, query: str) -> None:
+        """Search within the docs
+
+        Parameters
+        ----------
+        query: :class:`str`
+            The query for the search
+        """
+        query = "#" + query
+        scores = [levenshtein(query, h) for h in headers]
+        lowest = min(scores)
+        header = headers[scores.index(lowest)]
+        await ctx.send(
+            f"<https://github.com/vlang/v/blob/master/doc/docs.md{header}>",
+            view=DeleteButtonView(ctx.author.id),
+        )
+
+    @commands.hybrid_command()
+    async def vdoc(self, ctx: commands.Context, module: str, *, query: str) -> None:
+        """Search within a vlib.
+
+        Parameters
+        ----------
+        module: :class:`str`
+            The module to search in
+        query: :class:`str`
+            The query for the search
+        """
+        lowest, closest = 2147483647, Section()
+        contents = self.docs.get(module)
+        if contents is None:
+            await ctx.send(f"Module `{module}` not found.", ephemeral=True)
+            return
+        for section in contents["contents"]:
+            score = levenshtein(query, section["name"])
+            if score < lowest:
+                lowest = score
                 closest = Section(
                     name=section["name"],
                     content=section["content"],
                     comments=[comment["text"] for comment in section["comments"]],
                 )
-    description = f"```v\n{closest.content}```"
-    blob = ""
-    for comment in closest.comments:
-        blob += comment.lstrip("\u0001")
-    if blob != "":
-        description += f"\n>>> {blob}"
-    await ctx.respond(
-        embed=hikari.Embed(
-            title=f"{module} {closest.name}",
-            description=description,
-            url=f"https://modules.vlang.io/{module}.html#{closest.name}",
-            color=0x4287F5,
-        )
-    )
-
-
-def rewrite_node(node: ast.AsyncFunctionDef):
-    if len(node.body) == 0:
-        body = [
-            ast.Return(ast.Constant(None)),
-        ]
-    elif len(node.body) == 1:
-        body = (
-            [
-                ast.Return(
-                    node.body[0]
-                    if isinstance(node.body[0], ast.expr)
-                    else node.body[0].value
-                ),
-            ]
-            if isinstance(node.body[0], (ast.Expr, ast.expr))
-            else node.body[0]
-        )
-    else:
-        body = [
-            *(
-                [
-                    *node.body[:-1],
-                    ast.Return(
-                        node.body[-1]
-                        if isinstance(node.body[-1], ast.expr)
-                        else node.body[-1].value
-                    ),
-                ]
-                if isinstance(node.body[-1], (ast.Expr, ast.expr))
-                else node.body
+            for child in section["children"]:
+                child_score = levenshtein(query, child["name"])
+                if child_score < lowest:
+                    lowest = child_score
+                    closest = Section(
+                        name=section["name"],
+                        content=section["content"],
+                        comments=[comment["text"] for comment in section["comments"]],
+                    )
+        description = f"```v\n{closest.content}```"
+        blob = ""
+        for comment in closest.comments:
+            blob += comment.lstrip("\u0001")
+        if blob != "":
+            description += f"\n>>> {blob}"
+        await ctx.send(
+            embed=discord.Embed(
+                title=f"{module} {closest.name}",
+                description=description,
+                url=config["docs"].get(
+                    module, f"https://modules.vlang.io/{module}.html"
+                )
+                + "#"
+                + closest.name,
+                color=0x4287F5,
             ),
-        ]
-
-    return ast.AsyncFunctionDef(
-        _fields=node._fields,
-        lineno=node.lineno,
-        col_offset=node.col_offset,
-        end_lineno=node.end_lineno,
-        name=node.name,
-        args=node.args,
-        body=body,
-        decorator_list=node.decorator_list,
-        returns=node.returns,
-        type_comment=node.type_comment,
-    )
-
-
-def rewrite(code: str, *, filename: str) -> str:
-    return ast.unparse(
-        rewrite_node(
-            typing.cast(ast.AsyncFunctionDef, ast.parse(code, filename).body[0])
+            view=DeleteButtonView(ctx.author.id),
         )
-    )
 
-
-@base.with_message_command
-@tanjun.with_owner_check(error_message="Only bot owners can use this command")
-@tanjun.as_message_command("reload", "Reload docs")
-async def reload_docs(ctx: tanjun.abc.MessageContext) -> None:
-    docs: dict[str, typing.Any] = load_docs()
-    await ctx.message.add_reaction("\N{THUMBS UP SIGN}")
-
-
-@base.with_message_command
-@tanjun.with_owner_check(error_message="Only bot owners can use this command")
-@tanjun.as_message_command("regenerate", "Regenerate docs")
-async def regenerate_docs(ctx: tanjun.abc.MessageContext) -> None:
-    message = await ctx.respond(
-        f"`v setup.vsh` exited with error:",
-    )
-    process = await asyncio.create_subprocess_shell(
-        "v setup.vsh",
-        stderr=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await process.communicate()
-    # f'[{cmd!r} exited with {proc.returncode}]')
-    if process.returncode != 0:
-        await message.edit(
-            "`v setup.vsh` exited with error:",
-            attachments=[
-                hikari.Bytes(stderr, "stderr.txt"),
-                hikari.Bytes(stdout, "stdout.txt"),
-            ],
-        )
-    else:
+    @commands.command("reload", hidden=True)
+    @commands.is_owner()
+    async def reload_docs(self, ctx: commands.Context) -> None:
+        """Reload docs."""
+        self.docs = load_docs()
         await ctx.message.add_reaction("\N{THUMBS UP SIGN}")
 
-
-@base.with_message_command
-@tanjun.with_owner_check(error_message="Only bot owners can use this command")
-@tanjun.with_argument("codes", converters=str, multi=True)
-@tanjun.as_message_command("eval", "Execute code")
-async def owner_eval(ctx: tanjun.abc.MessageContext, codes: list[str]) -> None:
-    code = " ".join(codes)
-    PREFIXES = ["```python\n", "```py\n", "```\n", "``", "`"]
-    for prefix in PREFIXES:
-        if code.startswith(prefix):
-            code = code[len(prefix) :]
-            break
-    SUFFIXES = ["\n```", "```", "``", "`"]
-    for suffix in SUFFIXES:
-        if code.endswith(suffix):
-            code = code[: -len(suffix)]
-            break
-    CODE_START: str = "```py\n"
-    CODE_END: str = "\n```"
-    LIMIT: int = 2000 - (len(CODE_START) + len(CODE_END))
-    try:
-        scope = {
-            "ast": ast,
-            "asyncio": asyncio,
-            "bot": bot,
-            "client": client,
-            "ctx": ctx,
-            "code": code,
-            "dataclasses": dataclasses,
-            "hikari": hikari,
-            "json": json,
-            "os": os,
-            "tanjun": tanjun,
-            "textwrap": textwrap,
-            "traceback": traceback,
-        }
-        exec(
-            rewrite(
-                f"async def __execute_fn():\n{textwrap.indent(text=code, prefix='    ')}",
-                filename="<discord>",
-            ),
-            scope,
+    @commands.command("vup", hidden=True)
+    @commands.is_owner()
+    async def vup(self, ctx: commands.Context) -> None:
+        """Update V."""
+        await ctx.typing()
+        process = await asyncio.create_subprocess_shell(
+            "v up",
+            stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
         )
-        r1 = await scope["__execute_fn"]()
-        if r1 is None:
-            await ctx.message.add_reaction("\N{GRINNING CAT FACE WITH SMILING EYES}")
-            return
-        r2 = repr(r1)
-        if len(r2) > 1989:
-            await ctx.respond(attachment=hikari.Bytes(r2.encode("utf_8"), "result.py"))
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            await ctx.send(
+                "`v up` exited with error:",
+                files=[
+                    discord.File(io.BytesIO(stderr), "stderr.txt"),
+                    discord.File(io.BytesIO(stdout), "stdout.txt"),
+                ],
+            )
         else:
-            await ctx.respond(f"```py\n{r2}\n```")
-    except BaseException as e:
-        print(e)
-        await ctx.message.add_reaction("\N{CRYING CAT FACE}")
-        stacktrace = "".join(traceback.format_exception(e))
-        print(stacktrace)
-        await ctx.author.send(f"{CODE_START}{stacktrace[:LIMIT]}{CODE_END}")
+            await ctx.message.add_reaction("\N{THUMBS UP SIGN}")
+
+    @commands.command("regenerate", hidden=True)
+    @commands.is_owner()
+    async def regenerate_docs(self, ctx: commands.Context) -> None:
+        """Regenerate docs."""
+        await ctx.typing()
+        process = await asyncio.create_subprocess_shell(
+            "v setup.vsh",
+            stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            await ctx.send(
+                "`v setup.vsh` exited with error:",
+                files=[
+                    discord.File(io.BytesIO(stderr), "stderr.txt"),
+                    discord.File(io.BytesIO(stdout), "stdout.txt"),
+                ],
+            )
+        else:
+            await ctx.message.add_reaction("\N{THUMBS UP SIGN}")
+
+    def clean_code(self, code: str) -> str:
+        PREFIXES = ["```rs\n", "```v\n", "```\n", "``", "`"]
+        for prefix in PREFIXES:
+            if code.startswith(prefix):
+                code = code[len(prefix) :]
+                break
+        SUFFIXES = ["\n```", "```", "``", "`"]
+        for suffix in SUFFIXES:
+            if code.endswith(suffix):
+                code = code[: -len(suffix)]
+                break
+        return code
+
+    v = app_commands.Group(name="v", description="V related stuff")
+
+    @v.command(name="eval", description="Show modal, then evaluate code")
+    async def slash_eval(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(EvalModal(timeout=None))
+
+    @v.command(name="cgen", description="Show modal, then show cgen output")
+    async def slash_cgen(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(CgenModal(timeout=None))
+
+    @v.command(name="format", description="Show modal, then format code")
+    async def slash_format(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(FormatModal(timeout=None))
+
+    @commands.command("eval", aliases=["e", "exec", "exe", "evl"])
+    async def text_eval(self, ctx: commands.Context, *, code: str) -> None:
+        """Execute V code.
+
+        Parameters
+        ----------
+        code: :class:`str`
+            The V code to format
+        """
+        response = await ctx.bot.v.run(self.clean_code(code))
+        if response.error != "":
+            if len(response.error) >= 1989:
+                await ctx.send(
+                    file=discord.File(
+                        io.BytesIO(response.error.encode("utf_8")), "error.rs"
+                    )
+                )
+            else:
+                await ctx.send(f"```rs\n{response.error}\n```")
+            return
+        elif len(response.output) >= 1989:
+            await ctx.send(
+                file=discord.File(
+                    io.BytesIO(response.output.encode("utf_8")), "output.rs"
+                )
+            )
+            return
+        await ctx.send(f"```rs\n{response.output}\n```")
+
+    @commands.command("cgen", aliases=["c", "gen", "g"])
+    async def text_cgen(self, ctx: commands.Context, *, code: str) -> None:
+        """Show cgen output from V code.
+
+        Parameters
+        ----------
+        code: :class:`str`
+            The V code to format
+        """
+        response = await ctx.bot.v.cgen(self.clean_code(code))
+        if response.error != "":
+            if len(response.error) >= 1989:
+                await ctx.send(
+                    file=discord.File(
+                        io.BytesIO(response.error.encode("utf_8")), "error.rs"
+                    )
+                )
+            else:
+                await ctx.send(f"```rs\n{response.error}\n```")
+            return
+        elif len(response.cgen_code) >= 1990:
+            await ctx.send(
+                file=discord.File(
+                    io.BytesIO(response.cgen_code.encode("utf_8")), "output.c"
+                )
+            )
+            return
+        await ctx.send(f"```c\n{response.cgen_code}\n```")
+
+    @commands.command("format", aliases=["f", "fmt", "formt"])
+    async def text_format(self, ctx: commands.Context, *, code: str) -> None:
+        """Format V code.
+
+        Parameters
+        ----------
+        code: :class:`str`
+            The V code to format
+        """
+        response = await ctx.bot.v.format(self.clean_code(code))
+        if response.error != "":
+            if len(response.error) >= 1989:
+                await ctx.send(
+                    file=discord.File(
+                        io.BytesIO(response.error.encode("utf_8")), "error.rs"
+                    )
+                )
+            else:
+                await ctx.send(f"```rs\n{response.error}\n```")
+            return
+        elif len(response.output) >= 1989:
+            await ctx.send(
+                file=discord.File(
+                    io.BytesIO(response.output.encode("utf_8")), "output.rs"
+                )
+            )
+            return
+        await ctx.send(f"```rs\n{response.output}\n```")
+
+
+# make vb!help not depend on cache
+class Context(commands.Context["Bot"]):
+    @property
+    def clean_prefix(self) -> str:
+        return self.prefix or str(self.bot.command_prefix)
+
+
+class Bot(commands.Bot):
+    _v: typing.Optional[vplayground.V]
+
+    @property
+    def v(self) -> vplayground.V:
+        if self._v is None:
+            raise ValueError
+        return self._v
+
+    async def get_context(
+        self, origin: typing.Union[discord.Message, discord.Interaction]
+    ) -> Context:
+        return await super().get_context(origin, cls=Context)
+
+
+bot = Bot(
+    command_prefix="vb!",
+    intents=discord.Intents(messages=True, message_content=True),
+    max_messages=None,
+    allowed_mentions=discord.AllowedMentions.none(),
+)
+
+
+class DeleteButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template="vbot-delete:(?P<user_id>[0-9]+)",
+):
+    def __init__(self, user_id: int) -> None:
+        self.user_id: int = user_id
+        super().__init__(
+            discord.ui.Button(
+                style=discord.ButtonStyle.danger,
+                custom_id=f"vbot-delete:{user_id}",
+                emoji="\N{WASTEBASKET}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(
+        cls, _1: discord.Interaction, _2: discord.ui.Button, match: re.Match[str], /
+    ):
+        return cls(int(match["user_id"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "Thats not your button.", ephemeral=True
+            )
+        if interaction.message is not None:
+            await interaction.message.delete()
+        await interaction.response.send_message("Deleted the message.", ephemeral=True)
+
+
+bot.add_dynamic_items(DeleteButton)
+
+
+class DeleteButtonView(discord.ui.View):
+    def __init__(self, user_id: int) -> None:
+        super().__init__(timeout=None)
+        self.add_item(DeleteButton(user_id))
 
 
 async def main() -> None:
-    bot.run()
+    discord.utils.setup_logging()
+    bot._v = vplayground.V(aiohttp.ClientSession())
+    await bot.add_cog(BaseCog())
+    await bot.load_extension("jishaku")
+    await bot.start(config["token"])
 
 
 if __name__ == "__main__":
-    client.add_component(base)
-    bot.run()
+    asyncio.run(main())
