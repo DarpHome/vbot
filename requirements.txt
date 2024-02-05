@@ -1,2 +1,2 @@
-hikari
-hikari-tanjun
+git+https://github.com/Rapptz/discord.py@master
+jishaku
