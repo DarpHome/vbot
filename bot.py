@@ -11,6 +11,7 @@ import os
 import io
 from os.path import join
 import re
+import sys
 import traceback
 import typing
 import vplayground
@@ -557,7 +558,16 @@ class DeleteButtonView(discord.ui.View):
 
 async def main() -> None:
     discord.utils.setup_logging()
-    bot._v = vplayground.V(aiohttp.ClientSession())
+    bot._v = vplayground.V(
+        aiohttp.ClientSession(
+            headers={
+                "User-Agent": "Vbot (+https://github.com/DarpHome/vbot) Python {0[3]}/{0[0]}.{0[1]}.{0[2]} aiohttp/{1}".format(
+                    sys.version_info,
+                    aiohttp.__version__,
+                ),
+            }
+        )
+    )
     await bot.add_cog(BaseCog())
     await bot.load_extension("jishaku")
     await bot.start(config["token"])
